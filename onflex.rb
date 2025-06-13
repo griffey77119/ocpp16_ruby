@@ -524,6 +524,14 @@ module OnFlex
 
           @relay.set_state :close
 
+          # 차량이 분리되어 충전기가 완전히 대기(Available) 상태로 돌아갈 때,
+          # J1772 표준에 따라 이 시점에는 CP(Control Pilot) 라인에 PWM 신호가 필요 없습니다.
+          # 차량이 없는데 PWM 신호가 남아 있으면 하드웨어 오동작, 불필요한 전력 소모, 예기치 않은 상태 전이가 발생할 수 있습니다.
+          # 따라서 이 시점에 PWM 신호를 완전히 꺼주는 것이 표준적이고 안전한 동작입니다.
+          # (J1772 표준 준수, 하드웨어 보호, 오동작 방지, 명확한 상태 전이 목적)
+          @pwm_controller.set_duty_cycle 0
+          @led_display.clear
+
           led_display_queue.enqueue :charging
 
           message = parent_task.with_timeout OCPP_CLIENT_TIMEOUT do
@@ -641,12 +649,22 @@ module OnFlex
 
           meter_values_task.stop
 
+          # StopTransaction(충전 종료) 이후에는 차량의 12V 배터리 방전을 방지하기 위해
+          # CP(Control Pilot) 라인의 PWM duty를 3%로 낮춥니다.
+          # 대부분의 차량은 duty가 3% 이하일 때 ECU(12V 시스템)가 슬립 모드로 진입하여 방전이 방지됩니다.
+          # 이 상태에서도 CP 신호는 살아 있으므로, 충전기와 차량 모두 연결 감지가 가능합니다.
+          # (방전 방지, 연결 감지 유지, 실차 테스트 필요)
           @pwm_controller.set_duty_cycle 3
           @relay.set_state :open
 
+          # 차량이 분리되어 충전기가 완전히 대기(Available) 상태로 돌아갈 때,
+          # 충전기의 12V 배터리 방전을 방지하기 위해 600초 후에 충전기의 전원을 끕니다.
+          # 이 시점에는 차량의 12V 배터리가 이미 방전되어 있으므로, 충전기의 전원을 끄는 것은 방전을 방지하는 목적입니다.
+          # (방전 방지, 하드웨어 보호 목적)
           Thread.new do
             sleep 600
             @relay.set_state :close
+            @pwm_controller.set_duty_cycle 0
           end
 
           led_display_queue.enqueue :finished
@@ -703,8 +721,13 @@ module OnFlex
         end
 
       ensure
+        # 차량이 분리되어 충전기가 완전히 대기(Available) 상태로 돌아갈 때,
+        # J1772 표준에 따라 이 시점에는 CP(Control Pilot) 라인에 PWM 신호가 필요 없습니다.
+        # 차량이 없는데 PWM 신호가 남아 있으면 하드웨어 오동작, 불필요한 전력 소모, 예기치 않은 상태 전이가 발생할 수 있습니다.
+        # 따라서 이 시점에 PWM 신호를 완전히 꺼주는 것이 표준적이고 안전한 동작입니다.
+        # (J1772 표준 준수, 하드웨어 보호, 오동작 방지, 명확한 상태 전이 목적)
         @relay.set_state :open
-        @pwm_controller.set_duty_cycle 100
+        @pwm_controller.set_duty_cycle 0
         @led_display.clear
 
         @logger.info "OnFlex, Stop Mode-A"
