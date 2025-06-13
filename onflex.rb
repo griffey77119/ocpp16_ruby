@@ -18,7 +18,7 @@ require "seven_zip_ruby"
 require_relative "onflex_classes"
 
 module OnFlex
-  FIRMWARE_VERSION = "1.9a"
+  FIRMWARE_VERSION = "1.10a"
 
   LOOP_INTERVAL = 0.1
 
@@ -641,8 +641,13 @@ module OnFlex
 
           meter_values_task.stop
 
-          @pwm_controller.set_duty_cycle 100
+          @pwm_controller.set_duty_cycle 3
           @relay.set_state :open
+
+          Thread.new do
+            sleep 600
+            @relay.set_state :close
+          end
 
           led_display_queue.enqueue :finished
 
